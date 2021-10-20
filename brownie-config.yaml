@@ -9,6 +9,8 @@ networks:
     verify: False
   ganache-local:
     verify: False
+  bdltestnet:
+    verify: False
 wallets:
   account1: ${PRIVATE_KEY1}
   account2: ${PRIVATE_KEY2}

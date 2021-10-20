@@ -1,52 +1,68 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.6.6;
+pragma solidity >=0.7.0 <0.8.9;
 
 contract MatchingPennies {
-    uint256 public constant betAmount = 1 ether;
-    uint256 public constant matchingTimeOut = 10 minutes;
-    uint256 public constant playingTimeOut = 10 minutes;
-    uint256 public constant revealingTimeOut = 10 minutes;
-    uint256 private constant _NOT_ENTERED = 1;
-    uint256 private constant _ENTERED = 2;
-    uint256 private _status;
-    enum Choice {
-        None,
-        Head,
-        Tail
-    }
-    enum Player {
-        PlayerA,
-        PlayerB
-    }
-    enum Outcomes {
-        None,
-        PlayerA,
-        PlayerB
-    }
-    enum GameStatus {
-        Matching,
-        Playing,
-        Revealing,
-        Calculating
-    }
     struct Game {
+        uint8 choiceA;
+        uint8 choiceB;
+        bytes32 commitmentA;
+        bytes32 commitmentB;
+        bytes32 randomA;
+        bytes32 randomB;
         address payable playerA;
         address payable playerB;
-        bytes32 encryptedChoicePlayerA;
-        bytes32 encryptedChoicePlayerB;
-        Choice choicePlayerA;
-        Choice choicePlayerB;
-        GameStatus gameStatus;
-        Outcomes outcome;
     }
-    Game[] public gameHistory;
-    Game public gameOngoing;
-    uint256 private matchingDeadline;
-    uint256 private playingDeadline;
-    uint256 private revealingDeadline;
+    event WinnerAnounce(
+        address winner,
+        address playerA,
+        address playerB,
+        bytes32 commitmentA,
+        bytes32 commitmentB,
+        uint8 choiceA,
+        uint8 choiceB,
+        bytes32 randomA,
+        bytes32 randomB
+    );
+    uint256 public constant betAmount = 1 ether;
+    uint256 public constant timeOut = 10 minutes;
+    uint256 private constant _NOT_ENTERED = 1;
+    uint256 private constant _ENTERED = 2;
+    uint256 public lastUpdate;
+    uint256 private _status;
+    Game public game;
 
-    constructor() public {
+    // mapping (address => uint256) public balance;
+
+    constructor() {
         _status = _NOT_ENTERED;
+        lastUpdate = block.timestamp;
+    }
+
+    function isMatching() private view returns (bool) {
+        return (game.playerA == address(0) || game.playerB == address(0));
+    }
+
+    function isCommitting() private view returns (bool) {
+        return (game.playerA != address(0) &&
+            game.playerB != address(0) &&
+            (game.commitmentA == 0 || game.commitmentB == 0));
+    }
+
+    function isRevealing() private view returns (bool) {
+        return (game.playerA != address(0) &&
+            game.playerB != address(0) &&
+            game.commitmentA != 0 &&
+            game.commitmentB != 0 &&
+            (game.choiceA == 0 || game.choiceB == 0));
+    }
+
+    function isCalculating() private view returns (bool) {
+        return (game.playerA != address(0) &&
+            game.playerB != address(0) &&
+            game.commitmentA != 0 &&
+            game.commitmentB != 0 &&
+            game.choiceA != 0 &&
+            game.choiceB != 0);
     }
 
     modifier equalToBetAmount() {
@@ -55,46 +71,32 @@ contract MatchingPennies {
     }
     modifier registered() {
         require(
-            msg.sender == gameOngoing.playerA ||
-                msg.sender == gameOngoing.playerB,
+            msg.sender == game.playerA || msg.sender == game.playerB,
             "You haven't registered for the game!"
         );
         _;
     }
     modifier unregistered() {
         require(
-            msg.sender != gameOngoing.playerA &&
-                msg.sender != gameOngoing.playerB,
+            msg.sender != game.playerA && msg.sender != game.playerB,
             "You have already registered for the game!"
         );
         _;
     }
     modifier matching() {
-        require(
-            gameOngoing.gameStatus == GameStatus.Matching,
-            "Game is not matching!"
-        );
+        require(isMatching(), "Game is not matching!");
         _;
     }
-    modifier playing() {
-        require(
-            gameOngoing.gameStatus == GameStatus.Playing,
-            "Game is not playing!"
-        );
+    modifier committing() {
+        require(isCommitting(), "Game is not committing!");
         _;
     }
     modifier revealing() {
-        require(
-            gameOngoing.gameStatus == GameStatus.Revealing,
-            "Game is not revealing!"
-        );
+        require(isRevealing(), "Game is not revealing!");
         _;
     }
     modifier calculating() {
-        require(
-            gameOngoing.gameStatus == GameStatus.Calculating,
-            "Game is not calculating!"
-        );
+        require(isCalculating(), "Game is not calculating!");
         _;
     }
     modifier nonReentrant() {
@@ -112,210 +114,178 @@ contract MatchingPennies {
         matching
         returns (string memory)
     {
-        if (gameOngoing.playerA == address(0)) {
-            gameOngoing.playerA = msg.sender;
-            matchingDeadline = now + matchingTimeOut;
+        if (game.playerA == address(0)) {
+            game.playerA = payable(msg.sender);
+            lastUpdate = block.timestamp;
             return "Registered as player A";
-        } else if (gameOngoing.playerB == address(0)) {
-            gameOngoing.playerB = msg.sender;
-            gameOngoing.gameStatus = GameStatus.Playing;
-            matchingDeadline = 0;
+        } else if (game.playerB == address(0)) {
+            game.playerB = payable(msg.sender);
+            lastUpdate = block.timestamp;
             return "Registered as player B";
         } else {
             revert("Game has started! Register for the next game!");
         }
     }
 
-    function play(bytes32 encryptedChoice) external playing registered {
-        if (msg.sender == gameOngoing.playerA) {
+    function commit(bytes32 commitment) external committing registered {
+        if (msg.sender == game.playerA) {
             require(
-                gameOngoing.encryptedChoicePlayerA == 0,
-                "You have already made a choice!"
+                game.commitmentA == 0,
+                "You have already made a commitment!"
             );
-            gameOngoing.encryptedChoicePlayerA = encryptedChoice;
-        } else if (msg.sender == gameOngoing.playerB) {
+            game.commitmentA = commitment;
+        } else if (msg.sender == game.playerB) {
             require(
-                gameOngoing.encryptedChoicePlayerB == 0,
-                "You have already made a choice!"
+                game.commitmentB == 0,
+                "You have already made a commitment!"
             );
-            gameOngoing.encryptedChoicePlayerB = encryptedChoice;
+            game.commitmentB = commitment;
         }
-        if (
-            gameOngoing.encryptedChoicePlayerA != 0 &&
-            gameOngoing.encryptedChoicePlayerB != 0
-        ) {
-            gameOngoing.gameStatus = GameStatus.Revealing;
-            playingDeadline = 0;
-        } else {
-            playingDeadline = now + playingTimeOut;
-        }
+        lastUpdate = block.timestamp;
     }
 
-    function reveal(uint8 playerChoice, bytes32 randomNumber)
+    function reveal(uint8 choice, bytes32 random)
         external
         revealing
         registered
-        nonReentrant
     {
-        require(
-            playerChoice == 1 || playerChoice == 2,
-            "You have made a invalid choice!"
-        );
-        if (msg.sender == gameOngoing.playerA) {
+        require(choice == 1 || choice == 2, "You have made a invalid choice!");
+        if (msg.sender == game.playerA) {
+            require(game.choiceA == 0, "You have already revealed a choice!");
             require(
-                gameOngoing.choicePlayerA == Choice.None,
-                "You have already revealed a choice!"
+                game.commitmentA == keccak256(abi.encodePacked(choice, random)),
+                "Your revealing didn't match your commitment!"
             );
+            game.choiceA = choice;
+            game.randomA = random;
+        } else if (msg.sender == game.playerB) {
+            require(game.choiceB == 0, "You have already revealed a choice!");
             require(
-                gameOngoing.encryptedChoicePlayerA ==
-                    keccak256(abi.encodePacked(playerChoice, randomNumber)),
-                "Your revealing didn't match your choice!"
+                game.commitmentB == keccak256(abi.encodePacked(choice, random)),
+                "Your revealing didn't match your commitment!"
             );
-            if (playerChoice == 1) {
-                gameOngoing.choicePlayerA = Choice.Head;
-            } else if (playerChoice == 2) {
-                gameOngoing.choicePlayerA = Choice.Tail;
-            }
-        } else if (msg.sender == gameOngoing.playerB) {
-            require(
-                gameOngoing.choicePlayerB == Choice.None,
-                "You have already revealed a choice!"
-            );
-            require(
-                gameOngoing.encryptedChoicePlayerB ==
-                    keccak256(abi.encodePacked(playerChoice, randomNumber)),
-                "Your revealing didn't match your choice!"
-            );
-            if (playerChoice == 1) {
-                gameOngoing.choicePlayerB = Choice.Head;
-            } else if (playerChoice == 2) {
-                gameOngoing.choicePlayerB = Choice.Tail;
-            }
+            game.choiceB = choice;
+            game.randomB = random;
         }
-        if (
-            gameOngoing.choicePlayerA != Choice.None &&
-            gameOngoing.choicePlayerB != Choice.None
-        ) {
-            gameOngoing.gameStatus = GameStatus.Calculating;
-            revealingDeadline = 0;
+        lastUpdate = block.timestamp;
+        if (game.choiceA != 0 && game.choiceB != 0) {
             calculate();
-        } else {
-            revealingDeadline = now + revealingTimeOut;
         }
     }
 
     function calculate() private {
         address payable winner;
-        if (gameOngoing.choicePlayerA == gameOngoing.choicePlayerB) {
-            gameOngoing.outcome = Outcomes.PlayerA;
-            winner = gameOngoing.playerA;
+        if (game.choiceA == game.choiceB) {
+            winner = game.playerA;
         } else {
-            gameOngoing.outcome = Outcomes.PlayerB;
-            winner = gameOngoing.playerB;
+            winner = game.playerB;
         }
-        gameHistory.push(gameOngoing);
+        emit WinnerAnounce(
+            winner,
+            game.playerA,
+            game.playerB,
+            game.commitmentA,
+            game.commitmentB,
+            game.choiceA,
+            game.choiceB,
+            game.randomA,
+            game.randomB
+        );
         reset();
         winner.transfer(2 ether);
     }
 
-    function timeOutCheck() public nonReentrant {
+    function timeOutCheck() public view returns (bool) {
+        return block.timestamp < (lastUpdate + timeOut);
+    }
+
+    function timeOutReset() public nonReentrant {
         address payable refundAddress;
         uint256 refundAmount;
-        if (gameOngoing.gameStatus == GameStatus.Matching) {
-            if (matchingDeadline != 0 && matchingDeadline < now) {
-                refundAddress = gameOngoing.playerA;
-                refundAmount = 1 ether;
+        require(block.timestamp < (lastUpdate + timeOut), "Didn't time out!");
+        if (isMatching()) {
+            //game is in matching phase
+            //Only player A has registored for the game, so refund the player A money.
+            refundAddress = game.playerA;
+            refundAmount = 1 ether;
+            reset();
+        } else if (isCommitting()) {
+            //game is in committing phase
+            if (game.commitmentA == 0 && game.commitmentB == 0) {
+                //If both player haven't made a commitment within the timeout period then the contract won't refund their money.
                 reset();
+            } else if (game.commitmentA != 0 && game.commitmentB == 0) {
+                //If a player make a commitment but the other player don't within the timeout period, then this player become the winner and take the reward.
+                refundAddress = game.playerA;
+                refundAmount = 2 ether;
+            } else if (game.commitmentA == 0 && game.commitmentB != 0) {
+                refundAddress = game.playerB;
+                refundAmount = 2 ether;
             }
-        } else if (gameOngoing.gameStatus == GameStatus.Playing) {
-            if (playingDeadline != 0 && playingDeadline < now) {
-                if (
-                    gameOngoing.encryptedChoicePlayerA == 0 &&
-                    gameOngoing.encryptedChoicePlayerB == 0
-                ) {
-                    reset();
-                } else if (
-                    gameOngoing.encryptedChoicePlayerA != 0 &&
-                    gameOngoing.encryptedChoicePlayerB == 0
-                ) {
-                    refundAddress = gameOngoing.playerA;
-                    refundAmount = 2 ether;
-                    gameOngoing.outcome = Outcomes.PlayerA;
-                } else if (
-                    gameOngoing.encryptedChoicePlayerA == 0 &&
-                    gameOngoing.encryptedChoicePlayerB != 0
-                ) {
-                    refundAddress = gameOngoing.playerB;
-                    refundAmount = 2 ether;
-                    gameOngoing.outcome = Outcomes.PlayerB;
-                }
-                gameHistory.push(gameOngoing);
+            emit WinnerAnounce(
+                refundAddress,
+                game.playerA,
+                game.playerB,
+                game.commitmentA,
+                game.commitmentB,
+                game.choiceA,
+                game.choiceB,
+                game.randomA,
+                game.randomB
+            );
+            reset();
+        } else if (isRevealing()) {
+            //game is in revealing phase
+            if (game.choiceA == 0 && game.choiceB == 0) {
+                //If both player haven't revealed within the timeout period then the contract won't refund their money.
                 reset();
+            } else if (game.choiceA != 0 && game.choiceB == 0) {
+                //If a player reveal but the other player don't within the timeout period, then this player become the winner and take the reward.
+                refundAddress = game.playerA;
+                refundAmount = 2 ether;
+            } else if (game.choiceA == 0 && game.choiceB != 0) {
+                refundAddress = game.playerB;
+                refundAmount = 2 ether;
             }
-        } else if (gameOngoing.gameStatus == GameStatus.Revealing) {
-            if (revealingDeadline != 0 && revealingDeadline < now) {
-                if (
-                    gameOngoing.choicePlayerA == Choice.None &&
-                    gameOngoing.choicePlayerB == Choice.None
-                ) {
-                    reset();
-                } else if (
-                    gameOngoing.choicePlayerA != Choice.None &&
-                    gameOngoing.choicePlayerB == Choice.None
-                ) {
-                    refundAddress = gameOngoing.playerA;
-                    refundAmount = 2 ether;
-                    gameOngoing.outcome = Outcomes.PlayerA;
-                } else if (
-                    gameOngoing.choicePlayerA == Choice.None &&
-                    gameOngoing.choicePlayerB != Choice.None
-                ) {
-                    refundAddress = gameOngoing.playerB;
-                    refundAmount = 2 ether;
-                    gameOngoing.outcome = Outcomes.PlayerB;
-                }
-                gameHistory.push(gameOngoing);
-                reset();
-            }
+            emit WinnerAnounce(
+                refundAddress,
+                game.playerA,
+                game.playerB,
+                game.commitmentA,
+                game.commitmentB,
+                game.choiceA,
+                game.choiceB,
+                game.randomA,
+                game.randomB
+            );
+            reset();
         }
+        // if the refundAddress isn't empty, transfer the refund or reward to it.
         if (refundAddress != address(0)) {
             refundAddress.transfer(refundAmount);
         }
     }
 
     function reset() private {
-        gameOngoing.playerA = address(0);
-        gameOngoing.playerB = address(0);
-        gameOngoing.encryptedChoicePlayerA = 0;
-        gameOngoing.encryptedChoicePlayerB = 0;
-        gameOngoing.gameStatus = GameStatus.Matching;
-        gameOngoing.choicePlayerA = Choice.None;
-        gameOngoing.choicePlayerB = Choice.None;
-        matchingDeadline = 0;
-        playingDeadline = 0;
-        revealingDeadline = 0;
+        game.playerA = payable(address(0));
+        game.playerB = payable(address(0));
+        game.commitmentA = 0;
+        game.commitmentB = 0;
+        game.choiceA = 0;
+        game.choiceB = 0;
+        game.randomA = 0;
+        game.randomB = 0;
     }
 
-    function getOngoingGameStatus() public view returns (string memory) {
-        if (gameOngoing.gameStatus == GameStatus.Matching) {
+    function getGameStatus() public view returns (string memory) {
+        if (isMatching()) {
             return "Matching";
-        } else if (gameOngoing.gameStatus == GameStatus.Playing) {
-            return "Playing";
-        } else if (gameOngoing.gameStatus == GameStatus.Calculating) {
+        } else if (isCommitting()) {
+            return "Committing";
+        } else if (isRevealing()) {
+            return "Revealing";
+        } else {
             return "Calculating";
         }
-    }
-
-    function getLastGameInformation()
-        public
-        view
-        returns (
-            address,
-            address,
-            Outcomes
-        )
-    {
-        Game memory game = gameHistory[gameHistory.length - 1];
-        return (game.playerA, game.playerB, game.outcome);
     }
 }
