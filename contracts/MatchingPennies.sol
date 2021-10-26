@@ -106,7 +106,7 @@ contract MatchingPennies {
         _status = _NOT_ENTERED;
     }
 
-    function registor()
+    function register()
         external
         payable
         equalToBetAmount

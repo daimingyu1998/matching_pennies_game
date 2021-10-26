@@ -36,7 +36,7 @@ def play_matching_pennies(matching_pennies):
 
 def play(matching_pennies, account, choice, sleep):
     assert choice == 1 or choice == 2
-    matching_pennies.registor(
+    matching_pennies.register(
         {"from": account, "value": 10 ** 18, "gas_limit": 10 ** 5}
     )
     print("Matching Complete: ",account.address)
