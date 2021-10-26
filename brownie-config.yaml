@@ -3,6 +3,8 @@ networks:
   default: development
   rinkeby:
     verify: True
+  ropsten:
+    verify: True
   mainnet-fork:
     verify: False
   development:

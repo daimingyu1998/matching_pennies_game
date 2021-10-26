@@ -153,7 +153,8 @@ contract MatchingPennies {
         if (msg.sender == game.playerA) {
             require(game.choiceA == 0, "You have already revealed a choice!");
             require(
-                game.commitmentA == keccak256(abi.encodePacked(choice, random)),
+                game.commitmentA ==
+                    keccak256(abi.encodePacked(msg.sender, choice, random)),
                 "Your revealing didn't match your commitment!"
             );
             game.choiceA = choice;
@@ -161,7 +162,8 @@ contract MatchingPennies {
         } else if (msg.sender == game.playerB) {
             require(game.choiceB == 0, "You have already revealed a choice!");
             require(
-                game.commitmentB == keccak256(abi.encodePacked(choice, random)),
+                game.commitmentB ==
+                    keccak256(abi.encodePacked(msg.sender, choice, random)),
                 "Your revealing didn't match your commitment!"
             );
             game.choiceB = choice;
