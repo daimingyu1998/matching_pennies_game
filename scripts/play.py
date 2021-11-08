@@ -9,7 +9,6 @@ import secrets
 from sha3 import keccak_256
 import time
 
-
 def deploy_matching_pennies():
     account1 = get_account(1)
     return MatchingPennies.deploy(
